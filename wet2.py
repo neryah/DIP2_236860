@@ -88,7 +88,7 @@ class kCalculator:
 
     def __calculateWeights(self, k):
         sigmaNN = 1
-        distWeights = np.zeros(len(self.allPatches.q), len(self.allPatches.r))
+        distWeights = np.zeros((len(self.allPatches.q), len(self.allPatches.r)))
         for j in range(distWeights.shape[1]):
             rAlpha = downsample(signal.convolve2d(self.allPatches.r[j], k, mode='same'))
             for i in range(distWeights.shape[0]):
@@ -105,6 +105,37 @@ def main():
     patchSize = 60  # how to decide?
     allPatches = patches(imgArr, patchSize)
     optimalK = kCalculator(allPatches, patchSize)
+
+
+
+
+
+
+    plt.title('original')
+    plt.imshow(imgArr, cmap='gray')
+    plt.show()
+
+    plt.title('gaussian')
+    plt.imshow(filteredImage.gaussianImg, cmap='gray')
+    plt.show()
+
+    plt.title('gaussian + downsampled')
+    plt.imshow(filteredImage.lowResGaussian, cmap='gray')
+    plt.show()
+
+    #
+    plt.title('sinc')
+    plt.imshow(filteredImage.sincImg, cmap='gray')
+    plt.show()
+    #
+    plt.title('sinc + downsampled')
+    plt.imshow(filteredImage.lowResSinc, cmap='gray')
+    plt.show()
+
+
+
+
+
 
 
 if __name__ == "__main__":
