@@ -78,6 +78,7 @@ class kCalculator:
     def __init__(self, allPatches):
         self.allPatches = allPatches
         self.k = self.__iterativeAlgorithm(allPatches.r[0].__len__())
+
     def __iterativeAlgorithm(self, patchSize):  # כרגע ההתחלה של איטרציה אחת
         # init k with delta
         k = fftpack.fftshift(scipy.signal.unit_impulse((patchSize, patchSize)))
@@ -122,11 +123,10 @@ def main():
     plt.imshow(filteredImage.lowResGaussian, cmap='gray')
     plt.show()
 
-    #
     plt.title('sinc')
     plt.imshow(filteredImage.sincImg, cmap='gray')
     plt.show()
-    #
+
     plt.title('sinc + downsampled')
     plt.imshow(filteredImage.lowResSinc, cmap='gray')
     plt.show()
