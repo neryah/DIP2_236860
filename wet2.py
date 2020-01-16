@@ -10,7 +10,7 @@ from PIL import Image
 ALPHA = 5  # may choose alpha
 
 
-def downsample(highSampled, alpha=ALPHA):  # may choose alpha
+def downsample(highSampled, alpha=ALPHA):
     return [[highSampled[y * alpha, x * alpha] for x in range(int(highSampled.shape[1] / alpha))] for y in
             range(int(highSampled.shape[0] / alpha))]
 
@@ -42,7 +42,7 @@ class patches:
         self.r = self.__createPatches(imgArr, patchSize, 1)  # high ==> no use of alpha
         self.q = self.__createPatches(imgArr, patchSize)
 
-    def __createPatches(self, imgArr, size, alpha=ALPHA):  # may choose alpha
+    def __createPatches(self, imgArr, size, alpha=ALPHA):
         size = int(size / alpha)
         patches = []
         for i in range(0, imgArr.shape[0] - size, size):
@@ -75,10 +75,9 @@ class RjCalculator:
 
 
 class kCalculator:
-    def __init__(self, allPatches, patchSize):
+    def __init__(self, allPatches):
         self.allPatches = allPatches
-        self.k = self.__iterativeAlgorithm(patchSize)
-
+        self.k = self.__iterativeAlgorithm(allPatches.r[0].__len__())
     def __iterativeAlgorithm(self, patchSize):  # כרגע ההתחלה של איטרציה אחת
         # init k with delta
         k = fftpack.fftshift(scipy.signal.unit_impulse((patchSize, patchSize)))
@@ -104,7 +103,7 @@ def main():
     filteredImage = imageVersions(imgArr)
     patchSize = 60  # how to decide?
     allPatches = patches(imgArr, patchSize)
-    optimalK = kCalculator(allPatches, patchSize)
+    optimalK = kCalculator(allPatches).k
 
 
 
