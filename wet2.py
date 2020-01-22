@@ -95,6 +95,9 @@ class patches:
         #self.qPCA = self.__pca()
         self.Rj = RjCalculator(self.r).getRj()
 
+    def calc(self, i, j):
+        return self.Rj[j].T @ self.Rj[j], self.Rj[j].T @ self.qVec[i]
+
     # def __pca(self):
     #     pca = PCA(n_components=25, svd_solver='full')
     #     pca.fit(self.qVec)
@@ -194,9 +197,9 @@ class kCalculator:
         for i in range(neighborsWeights.shape[0]):
             for j in range(neighborsWeights.shape[1]):
                 if neighborsWeights[i, j]:
-                    R_squared = self.allPatches.Rj[j].T @ self.allPatches.Rj[j]
-                    sumLeft += neighborsWeights[i, j] * R_squared + CSquared
-                    sumRight += neighborsWeights[i, j] * self.allPatches.Rj[j].T @ self.allPatches.qVec[i]
+                    left, right = self.allPatches.calc(self, i, j)
+                    sumLeft += neighborsWeights[i, j] * left + CSquared
+                    sumRight += neighborsWeights[i, j] * right
 
         return np.linalg.inv((1 / (sigmaNN ** 2)) * sumLeft + matEpsilon) @ sumRight
 
