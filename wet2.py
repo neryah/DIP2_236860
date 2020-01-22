@@ -65,8 +65,6 @@ class imageVersions:
         self.lowResGaussian = downsample(self.gaussianImg)
         self.lowResSinc = downsample(self.sincImg)
 
-
-
         #############
         gaussian_restored_true = wiener_filter(self.gaussianImg, self.gaussianKernel, 0.1)
         downsampled_low_res_gaussian = downsample(self.lowResGaussian)
@@ -92,16 +90,8 @@ class patches:
         self.q = self.__createPatches(imgArr, patchSize)
         self.qVec = np.array([patch.reshape(patch.size) for patch in self.q])
 
-        #self.qPCA = self.__pca()
+        # self.qPCA = self.__pca()
         self.Rj = RjCalculator(self.r).getRj()
-
-    def calc(self, i, j):
-        return self.Rj[j].T @ self.Rj[j], self.Rj[j].T @ self.qVec[i]
-
-    # def __pca(self):
-    #     pca = PCA(n_components=25, svd_solver='full')
-    #     pca.fit(self.qVec)
-    #     return pca.transform(self.qVec)
 
     def __createPatches(self, imgArr, size, alpha=ALPHA):
         size = int(size / alpha)
@@ -111,6 +101,25 @@ class patches:
             for j in range(0, imgArr.shape[1] - size, step):
                 patches.append(imgArr[i:i + size, j:j + size])
         return patches
+
+    def calcSumElement(self, i, j):
+        return self.Rj[j].T @ self.Rj[j], self.Rj[j].T @ self.qVec[i]
+
+    def calculateWeights(self, k, sigmaNN):
+        num_neighbors = 11
+        rAlpha = np.array([element @ k for element in self.Rj])
+        tree = sklearn.neighbors.BallTree(rAlpha, leaf_size=2)
+        distWeights = np.zeros((len(self.q), len(self.r)))
+
+        for i, qi in enumerate(self.qVec):
+            _, neighbor_indices = tree.query(np.expand_dims(qi, 0), k=num_neighbors)
+            for j in neighbor_indices:
+                distWeights[i, j] = np.exp(-0.5 * (np.linalg.norm(qi - rAlpha[j]) ** 2) / (sigmaNN ** 2))
+        return normalizeByRows(distWeights)
+    # def __pca(self):
+    #     pca = PCA(n_components=25, svd_solver='full')
+    #     pca.fit(self.qVec)
+    #     return pca.transform(self.qVec)
 
 
 class RjCalculator:
@@ -145,23 +154,19 @@ class kCalculator:
         self.k = self.__iterativeAlgorithm(allPatches.r[0].__len__())
 
     def __iterativeAlgorithm(self, patchSize):
-        sigmaNN = 0.1
         CSquared = self.__squaredLaplacian(patchSize)
-
         # init k with delta
         delta = fftpack.fftshift(scipy.signal.unit_impulse((patchSize, patchSize)))
         k = delta.reshape(delta.size)
-
         for t in range(16):
-            k = self.__oneIteration(k, sigmaNN, CSquared)
+            k = self.__oneIteration(k, CSquared)
 
             # curr_k_image = k.reshape((patchSize, patchSize))
             # plt.imshow(curr_k_image, cmap='gray')
             # plt.title(f'curr_k as an image ')
             # plt.show()
 
-
-            #copied code, can be fitted:
+            # copied code, can be fitted, preferable in another func:
             # Wiener_Filter_Constant = 0.01
             # # print(f'curr_k shape: {curr_k.shape}')
             # factor = 1
@@ -179,16 +184,11 @@ class kCalculator:
             #         curr_k_image = curr_k.reshape((patch_size, patch_size))
             #
             #         save_as_img(curr_k_image, title_name + "_kernel", my_format)
-
-
-        curr_k_image = k.reshape((patchSize, patchSize))
-        plt.imshow(curr_k_image, cmap='gray')
-        plt.show()
         return k
 
-
-    def __oneIteration(self, k, sigmaNN, CSquared):
-        neighborsWeights = self.__calculateWeights(k, sigmaNN)
+    def __oneIteration(self, k, CSquared):
+        sigmaNN = 0.1
+        neighborsWeights = self.allPatches.calculateWeights(k, sigmaNN)
         size = k.shape[0]
         matEpsilon = np.ones((size, size)) * 1e-10
         sumLeft = np.zeros((size, size))
@@ -197,23 +197,11 @@ class kCalculator:
         for i in range(neighborsWeights.shape[0]):
             for j in range(neighborsWeights.shape[1]):
                 if neighborsWeights[i, j]:
-                    left, right = self.allPatches.calc(self, i, j)
+                    left, right = self.allPatches.calcSumElement(i, j)
                     sumLeft += neighborsWeights[i, j] * left + CSquared
                     sumRight += neighborsWeights[i, j] * right
 
-        return np.linalg.inv((1 / (sigmaNN ** 2)) * sumLeft + matEpsilon) @ sumRight
-
-    def __calculateWeights(self, k, sigmaNN):
-        num_neighbors = 11
-        rAlpha = np.array([element @ k for element in self.allPatches.Rj])
-        tree = sklearn.neighbors.BallTree(rAlpha, leaf_size=2)
-        distWeights = np.zeros((len(self.allPatches.q), len(self.allPatches.r)))
-
-        for i, qi in enumerate(self.allPatches.qVec):
-            _, neighbor_indices = tree.query(np.expand_dims(qi, 0), k=num_neighbors)
-            for j in neighbor_indices:
-                distWeights[i, j] = np.exp(-0.5 * (np.linalg.norm(qi - rAlpha[j]) ** 2)/(sigmaNN ** 2))
-        return normalizeByRows(distWeights)
+        return np.linalg.inv(sumLeft * (sigmaNN ** -2) + matEpsilon) @ sumRight
 
     def __squaredLaplacian(self, length):
         C = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
@@ -231,8 +219,6 @@ class kCalculator:
         return C.T @ C
 
 
-
-
 def main():
     t0 = time.time()
 
@@ -243,6 +229,9 @@ def main():
     allPatches = patches(imgArr, patchSize)
     optimalK = kCalculator(allPatches).k
 
+    curr_k_image = optimalK.reshape((patchSize, patchSize))
+    plt.imshow(curr_k_image, cmap='gray')
+    plt.show()
 
     plt.title('original')
     plt.imshow(imgArr, cmap='gray')
