@@ -141,7 +141,7 @@ class kCalculator:
         self.allPatches = allPatches
         self.k = self.__iterativeAlgorithm(allPatches.r[0].__len__())
 
-    def __iterativeAlgorithm(self, patchSize, alpha=ALPHA):  # כרגע ההתחלה של איטרציה אחת
+    def __iterativeAlgorithm(self, patchSize):
         sigmaNN = 0.1
         CSquared = self.__squaredLaplacian(patchSize)
 
@@ -158,7 +158,7 @@ class kCalculator:
             # plt.show()
 
 
-            #copied code, can be fitted
+            #copied code, can be fitted:
             # Wiener_Filter_Constant = 0.01
             # # print(f'curr_k shape: {curr_k.shape}')
             # factor = 1
@@ -181,6 +181,7 @@ class kCalculator:
         curr_k_image = k.reshape((patchSize, patchSize))
         plt.imshow(curr_k_image, cmap='gray')
         plt.show()
+        return k
 
 
     def __oneIteration(self, k, sigmaNN, CSquared):
