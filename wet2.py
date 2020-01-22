@@ -87,7 +87,7 @@ class imageVersions:
 
 class patches:
     def __init__(self, imgArr, patchSize):
-        self.r = self.__createPatches(imgArr, patchSize, 1)  # high ==> no use of alpha
+        self.r = self.__createPatches(imgArr, patchSize, 1)  # no use of alpha
 
         self.q = self.__createPatches(imgArr, patchSize)
         self.qVec = np.array([patch.reshape(patch.size) for patch in self.q])
@@ -118,9 +118,9 @@ class RjCalculator:
         return [self.__RjElement(patch) for patch in self.rPatches]
 
     def __RjElement(self, patch, alpha=ALPHA):
-        return self.downsample_shrink_matrix_1d(circulant(patch.reshape(patch.size)), alpha ** 2)
+        return self.__downsampleShrinkMatrix1d(circulant(patch.reshape(patch.size)), alpha ** 2)
 
-    def downsample_shrink_matrix_1d(self, mat, alpha):
+    def __downsampleShrinkMatrix1d(self, mat, alpha):
         (mat_shape_x, mat_shape_y) = mat.shape
         new_size = (int(mat_shape_x / alpha), int(mat_shape_y))
         downsampled = np.zeros(new_size)
@@ -148,6 +148,7 @@ class kCalculator:
         # init k with delta
         delta = fftpack.fftshift(scipy.signal.unit_impulse((patchSize, patchSize)))
         k = delta.reshape(delta.size)
+
         for t in range(16):
             k = self.__oneIteration(k, sigmaNN, CSquared)
 
@@ -210,8 +211,7 @@ class kCalculator:
                 distWeights[i, j] = np.exp(-0.5 * (np.linalg.norm(qi - rAlpha[j]) ** 2)/(sigmaNN ** 2))
         return normalizeByRows(distWeights)
 
-    ## return laplacian vector
-    def __squaredLaplacian(self, length):  # the matrix in a square, and the parameter is the length of the side of the square
+    def __squaredLaplacian(self, length):
         C = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
         Cvec = np.zeros(length * length)
         rows_length_diff = abs(length - C.shape[1])
