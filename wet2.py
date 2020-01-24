@@ -2,14 +2,9 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import fftpack, signal
-import scipy.misc
-import scipy.io as scio
-from scipy.sparse import csgraph
 from scipy.linalg import circulant
-import PIL
-from PIL import Image
+import scipy.misc
 import sklearn
-from sklearn.decomposition import PCA
 import sklearn.neighbors
 import cv2
 
@@ -25,27 +20,25 @@ def downsample(highSampled, alpha=ALPHA):
     return downsampled
 
 
-def upsample_matrix(mat, alpha=ALPHA):
-    (mat_shape_x, mat_shape_y) = mat.shape
-    new_size = (int(mat_shape_y * alpha), int(mat_shape_x * alpha))
-    upsampled_filtered_image = cv2.resize(mat, dsize=new_size, interpolation=cv2.INTER_CUBIC)
-    return upsampled_filtered_image
+def upsampleMatrix(lowSampled, alpha=ALPHA):
+    (xSize, ySize) = lowSampled.shape
+    newSize = (int(ySize * alpha), int(xSize * alpha))
+    return cv2.resize(lowSampled, dsize=newSize, interpolation=cv2.INTER_CUBIC)
 
 
-def wiener_filter(image, psf, k):
-    image_dft = fftpack.fft2(image)
-    psf_dft = fftpack.fft2(fftpack.ifftshift(psf), shape=image_dft.shape)
+def wienerFilter(image, psf, k):
+    imageDFT = fftpack.fft2(image)
+    psf_dft = fftpack.fft2(fftpack.ifftshift(psf), shape=imageDFT.shape)
     filter_dft = np.conj(psf_dft) / (np.abs(psf_dft) ** 2 + k)
-    recovered_dft = image_dft * filter_dft
-    return np.real(fftpack.ifft2(recovered_dft))
+    return np.real(fftpack.ifft2(imageDFT * filter_dft))
 
 
 def normalizeByRows(distWeights):
-    neighbors_weights_sum = np.sum(distWeights, axis=1)
+    neighborsWeightsSum = np.sum(distWeights, axis=1)
     for row in range(distWeights.shape[0]):
-        row_sum = neighbors_weights_sum[row]
-        if row_sum:
-            distWeights[row] = distWeights[row] / row_sum
+        rowSum = neighborsWeightsSum[row]
+        if rowSum:
+            distWeights[row] = distWeights[row] / rowSum
     return distWeights
 
 
@@ -66,9 +59,9 @@ class imageVersions:
         self.lowResSinc = downsample(self.sincImg)
 
         #############
-        gaussian_restored_true = wiener_filter(self.gaussianImg, self.gaussianKernel, 0.1)
+        gaussian_restored_true = wienerFilter(self.gaussianImg, self.gaussianKernel, 0.1)
         downsampled_low_res_gaussian = downsample(self.lowResGaussian)
-        gaussian_img_high_res = upsample_matrix(self.lowResGaussian)
+        gaussian_img_high_res = upsampleMatrix(self.lowResGaussian)
         #############
 
     def __gaussianMatrix(self):
@@ -106,13 +99,13 @@ class patches:
         return self.Rj[j].T @ self.Rj[j], self.Rj[j].T @ self.qVec[i]
 
     def calculateWeights(self, k, sigmaNN):
-        num_neighbors = 11
+        numNeighbors = 11
         rAlpha = np.array([element @ k for element in self.Rj])
         tree = sklearn.neighbors.BallTree(rAlpha, leaf_size=2)
         distWeights = np.zeros((len(self.q), len(self.r)))
 
         for i, qi in enumerate(self.qVec):
-            _, neighbor_indices = tree.query(np.expand_dims(qi, 0), k=num_neighbors)
+            _, neighbor_indices = tree.query(np.expand_dims(qi, 0), k=numNeighbors)
             for j in neighbor_indices:
                 distWeights[i, j] = np.exp(-0.5 * (np.linalg.norm(qi - rAlpha[j]) ** 2) / (sigmaNN ** 2))
         return normalizeByRows(distWeights)
@@ -132,12 +125,12 @@ class RjCalculator:
     def __RjElement(self, patch, alpha=ALPHA):
         return self.__downsampleShrinkMatrix1d(circulant(patch.reshape(patch.size)), alpha ** 2)
 
-    def __downsampleShrinkMatrix1d(self, mat, alpha):
-        (mat_shape_x, mat_shape_y) = mat.shape
-        new_size = (int(mat_shape_x / alpha), int(mat_shape_y))
-        downsampled = np.zeros(new_size)
-        for i in range(new_size[0]):
-            downsampled[i, :] = mat[alpha * i, :]
+    def __downsampleShrinkMatrix1d(self, highSampled, alpha):
+        (xSize, ySize) = highSampled.shape
+        newSize = (int(xSize / alpha), int(ySize))
+        downsampled = np.zeros(newSize)
+        for i in range(newSize[0]):
+            downsampled[i, :] = highSampled[alpha * i, :]
         return downsampled
     #
     # def __sameSizeDownsampleWithZeros(self, mat, alpha=ALPHA):  # may choose alpha
