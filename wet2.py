@@ -20,17 +20,25 @@ def downsample(highSampled, alpha=ALPHA):
     return downsampled
 
 
-def upsampleMatrix(lowSampled, alpha=ALPHA):
-    (xSize, ySize) = lowSampled.shape
-    newSize = (int(ySize * alpha), int(xSize * alpha))
-    return cv2.resize(lowSampled, dsize=newSize, interpolation=cv2.INTER_CUBIC)
-
-
-def wienerFilter(image, psf, k):
-    imageDFT = fftpack.fft2(image)
-    psf_dft = fftpack.fft2(fftpack.ifftshift(psf), shape=imageDFT.shape)
-    filter_dft = np.conj(psf_dft) / (np.abs(psf_dft) ** 2 + k)
-    return np.real(fftpack.ifft2(imageDFT * filter_dft))
+# def upsampleMatrix(lowSampled, alpha=ALPHA):
+#     (xSize, ySize) = lowSampled.shape
+#     newSize = (int(ySize * alpha), int(xSize * alpha))
+#     return cv2.resize(lowSampled, dsize=newSize, interpolation=cv2.INTER_CUBIC)
+#
+#
+def wienerFilter(img, psf, k=0.1):
+    if np.sum(psf):
+        psf /= np.sum(psf)
+    psf = fftpack.fft2(psf, shape=img.shape)
+    psf = np.conj(psf) / (np.abs(psf) ** 2 + k)
+    return np.abs(fftpack.ifft2(fftpack.fft2(np.copy(img)) * psf))
+#
+#
+# def wienerFilter2(image, psf, k):
+#     imageDFT = fftpack.fft2(image)
+#     psf_dft = fftpack.fft2(fftpack.ifftshift(psf), shape=imageDFT.shape)
+#     filter_dft = np.conj(psf_dft) / (np.abs(psf_dft) ** 2 + k)
+#     return np.real(fftpack.ifft2(imageDFT * filter_dft))
 
 
 def normalizeByRows(distWeights):
@@ -42,42 +50,78 @@ def normalizeByRows(distWeights):
     return distWeights
 
 
+def psnr(orig, recycled):
+    return 20 * np.log10(orig.max() / (np.sqrt(np.mean((orig - recycled) ** 2))))
+
+
 class imageVersions:
     def __init__(self, imgArr, windowSize=15):
-        self.evenlySpacedUnion = np.linspace(-(windowSize / 2), windowSize / 2, windowSize)
 
-        self.gaussianKernel = self.__gaussianMatrix()
+        self.gaussianKernel = self.__gaussianMatrix(np.linspace(-(windowSize / 16), windowSize / 16, windowSize))
         plt.imshow(self.gaussianKernel, cmap='gray')
         plt.title("Real gaussian PSF")
         plt.show()
+        self.sincKernel = self.__sincMatrix(np.linspace(-(windowSize / 4), windowSize / 4, windowSize))
 
         self.gaussianImg = signal.convolve2d(imgArr, self.gaussianKernel, mode='same', boundary='wrap')
-        self.sincImg = signal.convolve2d(imgArr, self.__sincMatrix())
+        self.sincImg = signal.convolve2d(imgArr, self.sincKernel, mode='same', boundary='wrap')
 
         # first practical assignment:
         self.lowResGaussian = downsample(self.gaussianImg)
         self.lowResSinc = downsample(self.sincImg)
 
-        #############
-        gaussian_restored_true = wienerFilter(self.gaussianImg, self.gaussianKernel, 0.1)
-        downsampled_low_res_gaussian = downsample(self.lowResGaussian)
-        gaussian_img_high_res = upsampleMatrix(self.lowResGaussian)
-        #############
 
-    def __gaussianMatrix(self):
+        # # upsample(downsample(conv(img, kernel))):
+        # gaussian_img_high_res = upsampleMatrix(self.lowResGaussian)
+        # sinc_img_high_res = upsampleMatrix(self.lowResSinc)
+
+        # restore knowing the kernel:
+        gaussianRestored = wienerFilter(self.gaussianImg, self.gaussianKernel)
+        sincRestored = wienerFilter(self.sincImg, self.sincKernel)
+        plotResults(sincRestored, "sinc-ker", "sinc-ker-optimal", imgArr)
+        plotResults(gaussianRestored, "gauss-ker", "gauss-ker-optimal", imgArr)
+
+    def restoreSinc(self, k):
+         return self.__wienerFilterToUpsample(self.lowResSinc, k)
+
+    def restoreGaussian(self, k):
+        return self.__wienerFilterToUpsample(self.lowResGaussian, k)
+
+    # def restoreSinc(self, k):
+    #      return wienerFilter(upsampleMatrix(self.lowResSinc), k)
+    #
+    # def restoreGaussian(self, k):
+    #     return wienerFilter(upsampleMatrix(self.lowResGaussian), k)
+
+
+    def __gaussianMatrix(self, evenlySpacedUnion):
         mu = 0
         sigma = 1
-        x, y = np.meshgrid(self.evenlySpacedUnion, self.evenlySpacedUnion)
+        x, y = np.meshgrid(evenlySpacedUnion, evenlySpacedUnion)
         d = np.sqrt(x ** 2 + y ** 2)
-        return np.exp(-((d - mu) ** 2 / (2.0 * sigma ** 2)))
+        gaussian = np.exp(-((d - mu) ** 2 / (2.0 * sigma ** 2)))
+        return gaussian / gaussian.sum()
 
-    def __sincMatrix(self):
-        xxMatrix = np.outer(self.evenlySpacedUnion, self.evenlySpacedUnion)
-        return np.sinc(xxMatrix)
+    def __sincMatrix(self, evenlySpacedUnion):
+        xxMatrix = np.outer(evenlySpacedUnion, evenlySpacedUnion)
+        sinc = np.sinc(xxMatrix)
+        return sinc / sinc.sum()
+
+    def __wienerFilterToUpsample(self, lowSampled, psf, k=0.1, alpha=ALPHA):
+        if np.sum(psf):
+            psf /= np.sum(psf)
+        (xSize, ySize) = lowSampled.shape
+        newSize = (int(ySize * alpha), int(xSize * alpha))
+        img = cv2.resize(lowSampled, dsize=newSize, interpolation=cv2.INTER_CUBIC)
+        psf = fftpack.fft2(psf, shape=img.shape)
+        psf = np.conj(psf) / (np.abs(psf) ** 2 + k)
+        return np.abs(fftpack.ifft2(fftpack.fft2(np.copy(img)) * psf))
+
 
 
 class patches:
     def __init__(self, imgArr, patchSize):
+        self.patchSize = patchSize
         self.r = self.__createPatches(imgArr, patchSize, 1)  # no use of alpha
 
         self.q = self.__createPatches(imgArr, patchSize)
@@ -88,7 +132,7 @@ class patches:
 
     def __createPatches(self, imgArr, size, alpha=ALPHA):
         size = int(size / alpha)
-        step = int(size / 2)
+        step = int(size * alpha / self.patchSize)
         patches = []
         for i in range(0, imgArr.shape[0] - size, step):
             for j in range(0, imgArr.shape[1] - size, step):
@@ -99,7 +143,7 @@ class patches:
         return self.Rj[j].T @ self.Rj[j], self.Rj[j].T @ self.qVec[i]
 
     def calculateWeights(self, k, sigmaNN):
-        numNeighbors = 11
+        numNeighbors = 5
         rAlpha = np.array([element @ k for element in self.Rj])
         tree = sklearn.neighbors.BallTree(rAlpha, leaf_size=2)
         distWeights = np.zeros((len(self.q), len(self.r)))
@@ -143,7 +187,7 @@ class RjCalculator:
 
 class kCalculator:
     def __init__(self, allPatches):
-        self.allPatches = allPatches
+        self.allPatchesFunctor = allPatches
         self.k = self.__iterativeAlgorithm(allPatches.r[0].__len__())
 
     def __iterativeAlgorithm(self, patchSize):
@@ -151,37 +195,17 @@ class kCalculator:
         # init k with delta
         delta = fftpack.fftshift(scipy.signal.unit_impulse((patchSize, patchSize)))
         k = delta.reshape(delta.size)
-        for t in range(16):
+        for t in range(5):
             k = self.__oneIteration(k, CSquared)
-
-            # curr_k_image = k.reshape((patchSize, patchSize))
-            # plt.imshow(curr_k_image, cmap='gray')
-            # plt.title(f'curr_k as an image ')
-            # plt.show()
-
-            # copied code, can be fitted, preferable in another func:
-            # Wiener_Filter_Constant = 0.01
-            # # print(f'curr_k shape: {curr_k.shape}')
-            # factor = 1
-            # for power in range(0, 4):
-            #     gaussian_restored = wiener_filter(gaussian_img_high_res, curr_k.reshape((patchSize, patchSize)),
-            #                                       Wiener_Filter_Constant * factor)
-            #
-            #     plt.imshow(gaussian_restored, cmap='gray')
-            #     plt.title(
-            #         f'restoration after iteration number: {t}, with wiener factor: {Wiener_Filter_Constant * factor}')
-            #     plt.show()
-            #     factor *= 10
-            #     if (t == 7) and factor == 100:
-            #         save_as_img(gaussian_restored, title_name, my_format)
-            #         curr_k_image = curr_k.reshape((patch_size, patch_size))
-            #
-            #         save_as_img(curr_k_image, title_name + "_kernel", my_format)
-        return k
+            curr_k_image = k.reshape((patchSize, patchSize))
+            plt.imshow(curr_k_image, cmap='gray')
+            plt.title(f'curr_k as an image ')
+            plt.show()
+        return k.reshape((patchSize, patchSize))
 
     def __oneIteration(self, k, CSquared):
-        sigmaNN = 0.1
-        neighborsWeights = self.allPatches.calculateWeights(k, sigmaNN)
+        sigmaNN = 0.06
+        neighborsWeights = self.allPatchesFunctor.calculateWeights(k, sigmaNN)
         size = k.shape[0]
         matEpsilon = np.ones((size, size)) * 1e-10
         sumLeft = np.zeros((size, size))
@@ -190,25 +214,53 @@ class kCalculator:
         for i in range(neighborsWeights.shape[0]):
             for j in range(neighborsWeights.shape[1]):
                 if neighborsWeights[i, j]:
-                    left, right = self.allPatches.calcSumElement(i, j)
+                    left, right = self.allPatchesFunctor.calcSumElement(i, j)
                     sumLeft += neighborsWeights[i, j] * left + CSquared
                     sumRight += neighborsWeights[i, j] * right
 
         return np.linalg.inv(sumLeft * (sigmaNN ** -2) + matEpsilon) @ sumRight
 
     def __squaredLaplacian(self, length):
-        C = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
-        Cvec = np.zeros(length * length)
-        rows_length_diff = abs(length - C.shape[1])
-        index = 0
-        for row in range(C.shape[0]):
-            for col in range(C.shape[1]):
-                Cvec[index] = C[row, col]
-                index += 1
-            for i in range(rows_length_diff):
-                Cvec[index] = 0
-                index += 1
-        C = circulant(Cvec)
+
+        val1 = -1
+        val2 = 4
+
+        # digonals init
+        diag1 = np.zeros((length, length))
+        diag2 = np.zeros((length, length))
+
+        for i in range(length):
+            if (i + 1) in range(length):
+                diag1[i, i + 1] = val1
+            if (i - 1) in range(length):
+                diag1[i, i - 1] = val1
+
+        for i in range(length):
+            diag1[i, i] = val2
+            diag2[i, i] = val1
+
+        # first diagonal
+        start = 0
+        end = length
+        C = np.zeros((length ** 2, length ** 2))
+
+        for num_matrices in range(length):
+            C[start: end, start: end] = diag1
+            start += length
+            end += length
+
+        # second diagonal
+        startX = 0
+        endXstartY = length
+        endY = 2 * length
+
+        for num_matrices in range(length - 1):
+            C[startX: endXstartY, endXstartY: endY] = diag2
+            C[endXstartY: endY, startX: endXstartY] = diag2
+            startX += length
+            endXstartY += length
+            endY += length
+
         return C.T @ C
 
 
@@ -217,33 +269,56 @@ def main():
 
     imgArr = np.array(plt.imread("DIPSourceHW2.png"))[:, :, 0]
     imgArr /= imgArr.max()
-    filteredImage = imageVersions(imgArr)
+    imgNewSize = np.zeros((imgArr.shape[0]+2, imgArr.shape[1]+2))
+    imgNewSize[1:-1, 1:-1] = imgArr
+    filteredImage = imageVersions(imgNewSize)
     patchSize = 15  # how to decide?
-    allPatches = patches(imgArr, patchSize)
-    optimalK = kCalculator(allPatches).k
 
-    curr_k_image = optimalK.reshape((patchSize, patchSize))
-    plt.imshow(curr_k_image, cmap='gray')
+    gaussianPatches = patches(filteredImage.lowResGaussian, patchSize)
+    gaussianOptimalK = kCalculator(gaussianPatches).k
+    gaussianRestoredOptimal = filteredImage.restoreGaussian(gaussianOptimalK)
+    sincRestoredNotOptimal = filteredImage.restoreSinc(gaussianOptimalK)
+
+    sincPatches = patches(filteredImage.lowResSinc, patchSize)
+    sincOptimalK = kCalculator(sincPatches).k
+    sincRestoredOptimal = filteredImage.restoreSinc(sincOptimalK)
+    gaussianRestoredNotOptimal = filteredImage.restoreGaussian(sincOptimalK)
+
+    ## plot results and PSNR with original high-res image
+    plotResults(gaussianRestoredOptimal, "gauss-ker", "gauss-ker", imgNewSize)
+    plotResults(gaussianRestoredNotOptimal, "gauss-ker", "sinc-ker", imgNewSize)
+    plotResults(sincRestoredOptimal, "sinc-ker", "sinc-ker", imgNewSize)
+    plotResults(sincRestoredNotOptimal, "sinc-ker", "gauss-ker", imgNewSize)
+
+
+    curr_k_gaus = gaussianOptimalK.reshape((patchSize, patchSize))
+    plt.imshow(curr_k_gaus, cmap='gray')
     plt.show()
 
-    plt.title('original')
-    plt.imshow(imgArr, cmap='gray')
-    plt.show()
+    # plt.title('original')
+    # plt.imshow(imgArr, cmap='gray')
+    # plt.show()
+    #
+    # plt.title('gaussian')
+    # plt.imshow(filteredImage.gaussianImg, cmap='gray')
+    # plt.show()
+    #
+    # plt.title('gaussian + downsampled')
+    # plt.imshow(filteredImage.lowResGaussian, cmap='gray')
+    # plt.show()
+    #
+    # plt.title('sinc')
+    # plt.imshow(filteredImage.sincImg, cmap='gray')
+    # plt.show()
+    #
+    # plt.title('sinc + downsampled')
+    # plt.imshow(filteredImage.lowResSinc, cmap='gray')
+    # plt.show()
 
-    plt.title('gaussian')
-    plt.imshow(filteredImage.gaussianImg, cmap='gray')
-    plt.show()
-
-    plt.title('gaussian + downsampled')
-    plt.imshow(filteredImage.lowResGaussian, cmap='gray')
-    plt.show()
-
-    plt.title('sinc')
-    plt.imshow(filteredImage.sincImg, cmap='gray')
-    plt.show()
-
-    plt.title('sinc + downsampled')
-    plt.imshow(filteredImage.lowResSinc, cmap='gray')
+def plotResults(restoredImg, blurredWith, restoredWith, origImg):
+    plt.imshow(restoredImg, cmap='gray')
+    PSNR = psnr(origImg[5:-5, 5:-5], restoredImg[5:-5, 5:-5])
+    plt.title(f'image blurred with {blurredWith} and restored with {restoredWith}. PSNR={PSNR:.2f}')
     plt.show()
 
 
