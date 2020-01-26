@@ -13,10 +13,8 @@ ALPHA = 3  # may choose alpha
 def matrix_to_vector(input):
     """
     Converts the input matrix to a vector by stacking the rows in a specific way explained here
-
     Arg:
     input -- a numpy matrix
-
     Returns:
     ouput_vector -- a column vector with size input.shape[0]*input.shape[1]
     """
@@ -34,10 +32,8 @@ def matrix_to_vector(input):
 def vector_to_matrix(input, output_shape):
     """
     Reshapes the output of the maxtrix multiplication to the shape "output_shape"
-
     Arg:
     input -- a numpy vector
-
     Returns:
     output -- numpy matrix with shape "output_shape"
     """
@@ -54,7 +50,6 @@ def vector_to_matrix(input, output_shape):
 
 def matrixForConv(I, F):
     """
-
     Arg:
     I -- 2D numpy matrix
     F -- numpy 2D matrix
@@ -125,8 +120,8 @@ def matrixForConv(I, F):
 
 
 def downsample(highSampled, alpha=ALPHA):
-    (xSize, ySize) = highSampled.shape
-    downsampled = np.zeros((int(xSize / alpha), int(ySize / alpha)))
+    # (xSize, ySize) = highSampled.shape
+    downsampled = np.zeros((int(highSampled.shape[0] / alpha), int(highSampled.shape[1] / alpha)))
     for i in range(downsampled.shape[0]):
         for j in range(downsampled.shape[1]):
             downsampled[i, j] = highSampled[alpha * i, alpha * j]
@@ -146,6 +141,7 @@ def plotResults(restoredImg, blurredWith, restoredWith, origImg):
     plt.imshow(restoredImg, cmap='gray')
     PSNR = psnr(origImg[5:-5, 5:-5], restoredImg[5:-5, 5:-5])
     plt.title(f'image blurred with {blurredWith} and restored with {restoredWith}. PSNR={PSNR:.2f}')
+    plt.savefig(blurredWith + " + " + restoredWith)
     plt.show()
 
 
@@ -170,10 +166,12 @@ class imageVersions:
 
         plt.title('low-res gaus-image')
         plt.imshow(self.lowResGaussian, cmap='gray')
+        plt.savefig("gaussLowRes")
         plt.show()
 
         plt.title('low-res sinc-image')
         plt.imshow(self.lowResSinc, cmap='gray')
+        plt.savefig("sincLowRes")
         plt.show()
 
 
@@ -199,8 +197,7 @@ class imageVersions:
     def __wienerFilterToUpsample(self, lowSampled, psf, k=0.1, alpha=ALPHA):
         if np.sum(psf):
             psf /= np.sum(psf)
-        (xSize, ySize) = lowSampled.shape
-        newSize = (int(ySize * alpha), int(xSize * alpha))
+        newSize = (int(lowSampled.shape[1] * alpha), int(lowSampled.shape[0] * alpha))
         img = cv2.resize(lowSampled, dsize=newSize, interpolation=cv2.INTER_CUBIC)
         psf = fftpack.fft2(psf, shape=img.shape)
         psf = np.conj(psf) / (np.abs(psf) ** 2 + k)
@@ -252,10 +249,11 @@ class RjCalculator:
 
     def __RjElement(self, patch, kernel, alpha=ALPHA):
         return self.__downsampleShrinkMatrix1d(matrixForConv(kernel, patch), alpha ** 2)
+        # another Rj calculation option
+        # return self.__downsampleShrinkMatrix1d(circulant(patch.reshape(patch.size)), alpha ** 2)
 
     def __downsampleShrinkMatrix1d(self, highSampled, alpha):
-        (xSize, ySize) = highSampled.shape
-        newSize = (int(xSize / alpha), int(ySize))
+        newSize = (int(highSampled.shape[0] / alpha), int(highSampled.shape[1]))
         downsampled = np.zeros(newSize)
         for i in range(newSize[0]):
             downsampled[i, :] = highSampled[alpha * i, :]
@@ -341,9 +339,9 @@ def main():
     # imgArr = np.transpose(imgArr)
     imgArr /= imgArr.max()
     expandImg = np.zeros((imgArr.shape[0]+2, imgArr.shape[1]+2))
-    expandImg[1:-1, 1:-1] = imgArr
+    expandImg[1:expandImg.shape[0] - 1, 1:expandImg.shape[1] - 1] = imgArr
     filteredImage = imageVersions(expandImg)
-    patchSize = 15  # how to decide?
+    patchSize = 15
 
     gaussianPatches = patches(filteredImage.lowResGaussian, patchSize)
     gaussianOptimalK = kCalculator(gaussianPatches).k
@@ -356,12 +354,15 @@ def main():
     gaussianRestoredNotOptimal = filteredImage.restoreGaussian(sincOptimalK)
 
     ## plot results and PSNR relative to original high-res image
-    plotResults(gaussianRestoredOptimal, "gauss-ker", "gauss-ker", expandImg)
-    plotResults(gaussianRestoredNotOptimal, "gauss-ker", "sinc-ker", expandImg)
-    plotResults(sincRestoredOptimal, "sinc-ker", "sinc-ker", expandImg)
-    plotResults(sincRestoredNotOptimal, "sinc-ker", "gauss-ker", expandImg)
+    plotResults(gaussianRestoredOptimal, "Gauss-ker", "Gauss-ker", expandImg)
+    plotResults(gaussianRestoredNotOptimal, "Gauss-ker", "Sinc-ker", expandImg)
+    plotResults(sincRestoredOptimal, "Sinc-ker", "Sinc-ker", expandImg)
+    plotResults(sincRestoredNotOptimal, "Sinc-ker", "Gauss-ker", expandImg)
 
     plt.imshow(gaussianOptimalK, cmap='gray')
+    plt.show()
+
+    plt.imshow(sincOptimalK, cmap='gray')
     plt.show()
 
 if __name__ == "__main__":
