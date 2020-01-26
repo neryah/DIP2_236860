@@ -1,14 +1,127 @@
-import time
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import fftpack, signal
-from scipy.linalg import circulant
+from scipy.linalg import toeplitz
 import scipy.misc
 import sklearn
 import sklearn.neighbors
 import cv2
 
 ALPHA = 3  # may choose alpha
+
+
+def matrix_to_vector(input):
+    """
+    Converts the input matrix to a vector by stacking the rows in a specific way explained here
+
+    Arg:
+    input -- a numpy matrix
+
+    Returns:
+    ouput_vector -- a column vector with size input.shape[0]*input.shape[1]
+    """
+    input_h, input_w = input.shape
+    output_vector = np.zeros(input_h * input_w, dtype=input.dtype)
+    # flip the input matrix up-down because last row should go first
+    input = np.flipud(input)
+    for i, row in enumerate(input):
+        st = i * input_w
+        nd = st + input_w
+        output_vector[st:nd] = row
+    return output_vector
+
+
+def vector_to_matrix(input, output_shape):
+    """
+    Reshapes the output of the maxtrix multiplication to the shape "output_shape"
+
+    Arg:
+    input -- a numpy vector
+
+    Returns:
+    output -- numpy matrix with shape "output_shape"
+    """
+    output_h, output_w = output_shape
+    output = np.zeros(output_shape, dtype=input.dtype)
+    for i in range(output_h):
+        st = i * output_w
+        nd = st + output_w
+        output[i, :] = input[st:nd]
+    # flip the output matrix up-down to get correct result
+    output = np.flipud(output)
+    return output
+
+
+def matrixForConv(I, F):
+    """
+
+    Arg:
+    I -- 2D numpy matrix
+    F -- numpy 2D matrix
+    Returns:
+    output -- matrix that multiplying it with I will return conv(I, F)
+    """
+    # number of columns and rows of the input
+    IRowNum, IColNum = I.shape
+
+    # number of columns and rows of the filter
+    FRowNum, FColNum = F.shape
+
+    #  calculate the output dimensions
+    outputRowNum = IRowNum + FRowNum - 1
+    outputColNum = IColNum + FColNum - 1
+
+    # zero pad the filter
+    FZeroPadded = np.pad(F, ((outputRowNum - FRowNum, 0),
+                               (0, outputColNum - FColNum)),
+                           'constant', constant_values=0)
+
+    # use each row of the zero-padded F to creat a toeplitz matrix.
+    #  Number of columns in this matrices are same as numbe of columns of input signal
+    toeplitzList = []
+    for i in range(FZeroPadded.shape[0] - 1, -1, -1):  # iterate from last row to the first row
+        c = FZeroPadded[i, :]  # i th row of the F
+        r = np.r_[c[0], np.zeros(IColNum - 1)]  # first row for the toeplitz fuction should be defined otherwise
+        # the result is wrong
+        toeplitz_m = toeplitz(c, r)  # this function is in scipy.linalg library
+        toeplitzList.append(toeplitz_m)
+        # doubly blocked toeplitz indices:
+    #  this matrix defines which toeplitz matrix from toeplitzList goes to which part of the doubly blocked
+    c = range(1, FZeroPadded.shape[0] + 1)
+    r = np.r_[c[0], np.zeros(IRowNum - 1, dtype=int)]
+    doublyIndices = toeplitz(c, r)
+
+    ## creat doubly blocked matrix with zero values
+    toeplitzShape = toeplitzList[0].shape  # shape of one toeplitz matrix
+    h = toeplitzShape[0] * doublyIndices.shape[0]
+    w = toeplitzShape[1] * doublyIndices.shape[1]
+    doublyBlockedShape = [h, w]
+    doublyBlocked = np.zeros(doublyBlockedShape)
+
+    # tile toeplitz matrices for each row in the doubly blocked matrix
+    b_h, b_w = toeplitzShape  # hight and withs of each block
+    for i in range(doublyIndices.shape[0]):
+        for j in range(doublyIndices.shape[1]):
+            start_i = i * b_h
+            start_j = j * b_w
+            end_i = start_i + b_h
+            end_j = start_j + b_w
+            doublyBlocked[start_i: end_i, start_j:end_j] = toeplitzList[doublyIndices[i, j] - 1]
+
+    convolutionMatrix = []
+    convolutionSize = IRowNum + FRowNum - 1
+    size = (convolutionSize - FRowNum)
+    start = int(np.math.floor(size / 2)) * convolutionSize + int(np.math.ceil(size / 2))
+    index = start
+    # build the convolution matrix.
+    while len(convolutionMatrix) < FRowNum ** 2:
+        for j in range(FRowNum):
+            convolutionMatrix.append(doublyBlocked[index + j])
+        index += convolutionSize
+    # return it as np array
+    convolutionMatrix = np.array(convolutionMatrix)
+    return convolutionMatrix
+    # return output
 
 
 def downsample(highSampled, alpha=ALPHA):
@@ -29,7 +142,6 @@ def normalizeByRows(distWeights):
     return distWeights
 
 
-
 def plotResults(restoredImg, blurredWith, restoredWith, origImg):
     plt.imshow(restoredImg, cmap='gray')
     PSNR = psnr(origImg[5:-5, 5:-5], restoredImg[5:-5, 5:-5])
@@ -43,7 +155,6 @@ def psnr(orig, recycled):
 
 class imageVersions:
     def __init__(self, imgArr, windowSize=15):
-
         self.gaussianKernel = self.__gaussianMatrix(np.linspace(-(windowSize / 16), windowSize / 16, windowSize))
         plt.imshow(self.gaussianKernel, cmap='gray')
         plt.title("Real gaussian PSF")
@@ -67,11 +178,10 @@ class imageVersions:
 
 
     def restoreSinc(self, k):
-         return self.__wienerFilterToUpsample(self.lowResSinc, k)
+        return self.__wienerFilterToUpsample(self.lowResSinc, k)
 
     def restoreGaussian(self, k):
         return self.__wienerFilterToUpsample(self.lowResGaussian, k)
-
 
     def __gaussianMatrix(self, evenlySpacedUnion):
         mu = 0
@@ -104,9 +214,9 @@ class patches:
 
         self.q = self.__createPatches(imgArr, patchSize)
         self.qVec = np.array([patch.reshape(patch.size) for patch in self.q])
-
-        # self.qPCA = self.__pca()
-        self.Rj = RjCalculator(self.r).getRj()
+        self.Rj_calc = RjCalculator(self.r)
+        delta = fftpack.fftshift(scipy.signal.unit_impulse((patchSize, patchSize)))
+        self.Rj = self.Rj_calc.getRj(delta)
 
     def __createPatches(self, imgArr, size, alpha=ALPHA):
         size = int(size / alpha)
@@ -137,11 +247,11 @@ class RjCalculator:
     def __init__(self, rPatches):
         self.rPatches = rPatches
 
-    def getRj(self):
-        return [self.__RjElement(patch) for patch in self.rPatches]
+    def getRj(self, kernel):
+        return [self.__RjElement(patch, kernel) for patch in self.rPatches]
 
-    def __RjElement(self, patch, alpha=ALPHA):
-        return self.__downsampleShrinkMatrix1d(circulant(patch.reshape(patch.size)), alpha ** 2)
+    def __RjElement(self, patch, kernel, alpha=ALPHA):
+        return self.__downsampleShrinkMatrix1d(matrixForConv(kernel, patch), alpha ** 2)
 
     def __downsampleShrinkMatrix1d(self, highSampled, alpha):
         (xSize, ySize) = highSampled.shape
@@ -173,7 +283,6 @@ class kCalculator:
         matEpsilon = np.ones((size, size)) * 1e-10
         sumLeft = np.zeros((size, size))
         sumRight = np.zeros_like(k)
-
         for i in range(neighborsWeights.shape[0]):
             for j in range(neighborsWeights.shape[1]):
                 if neighborsWeights[i, j]:
@@ -228,9 +337,8 @@ class kCalculator:
 
 
 def main():
-    t0 = time.time()
-
     imgArr = np.array(plt.imread("DIPSourceHW2.png"))[:, :, 0]
+    # imgArr = np.transpose(imgArr)
     imgArr /= imgArr.max()
     expandImg = np.zeros((imgArr.shape[0]+2, imgArr.shape[1]+2))
     expandImg[1:-1, 1:-1] = imgArr
@@ -247,7 +355,7 @@ def main():
     sincRestoredOptimal = filteredImage.restoreSinc(sincOptimalK)
     gaussianRestoredNotOptimal = filteredImage.restoreGaussian(sincOptimalK)
 
-    ## plot results and PSNR with original high-res image
+    ## plot results and PSNR relative to original high-res image
     plotResults(gaussianRestoredOptimal, "gauss-ker", "gauss-ker", expandImg)
     plotResults(gaussianRestoredNotOptimal, "gauss-ker", "sinc-ker", expandImg)
     plotResults(sincRestoredOptimal, "sinc-ker", "sinc-ker", expandImg)
