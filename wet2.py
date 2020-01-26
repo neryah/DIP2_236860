@@ -20,27 +20,6 @@ def downsample(highSampled, alpha=ALPHA):
     return downsampled
 
 
-# def upsampleMatrix(lowSampled, alpha=ALPHA):
-#     (xSize, ySize) = lowSampled.shape
-#     newSize = (int(ySize * alpha), int(xSize * alpha))
-#     return cv2.resize(lowSampled, dsize=newSize, interpolation=cv2.INTER_CUBIC)
-#
-#
-def wienerFilter(img, psf, k=0.1):
-    if np.sum(psf):
-        psf /= np.sum(psf)
-    psf = fftpack.fft2(psf, shape=img.shape)
-    psf = np.conj(psf) / (np.abs(psf) ** 2 + k)
-    return np.abs(fftpack.ifft2(fftpack.fft2(np.copy(img)) * psf))
-#
-#
-# def wienerFilter2(image, psf, k):
-#     imageDFT = fftpack.fft2(image)
-#     psf_dft = fftpack.fft2(fftpack.ifftshift(psf), shape=imageDFT.shape)
-#     filter_dft = np.conj(psf_dft) / (np.abs(psf_dft) ** 2 + k)
-#     return np.real(fftpack.ifft2(imageDFT * filter_dft))
-
-
 def normalizeByRows(distWeights):
     neighborsWeightsSum = np.sum(distWeights, axis=1)
     for row in range(distWeights.shape[0]):
@@ -48,6 +27,14 @@ def normalizeByRows(distWeights):
         if rowSum:
             distWeights[row] = distWeights[row] / rowSum
     return distWeights
+
+
+
+def plotResults(restoredImg, blurredWith, restoredWith, origImg):
+    plt.imshow(restoredImg, cmap='gray')
+    PSNR = psnr(origImg[5:-5, 5:-5], restoredImg[5:-5, 5:-5])
+    plt.title(f'image blurred with {blurredWith} and restored with {restoredWith}. PSNR={PSNR:.2f}')
+    plt.show()
 
 
 def psnr(orig, recycled):
@@ -70,28 +57,20 @@ class imageVersions:
         self.lowResGaussian = downsample(self.gaussianImg)
         self.lowResSinc = downsample(self.sincImg)
 
+        plt.title('low-res gaus-image')
+        plt.imshow(self.lowResGaussian, cmap='gray')
+        plt.show()
 
-        # # upsample(downsample(conv(img, kernel))):
-        # gaussian_img_high_res = upsampleMatrix(self.lowResGaussian)
-        # sinc_img_high_res = upsampleMatrix(self.lowResSinc)
+        plt.title('low-res sinc-image')
+        plt.imshow(self.lowResSinc, cmap='gray')
+        plt.show()
 
-        # restore knowing the kernel:
-        gaussianRestored = wienerFilter(self.gaussianImg, self.gaussianKernel)
-        sincRestored = wienerFilter(self.sincImg, self.sincKernel)
-        plotResults(sincRestored, "sinc-ker", "sinc-ker-optimal", imgArr)
-        plotResults(gaussianRestored, "gauss-ker", "gauss-ker-optimal", imgArr)
 
     def restoreSinc(self, k):
          return self.__wienerFilterToUpsample(self.lowResSinc, k)
 
     def restoreGaussian(self, k):
         return self.__wienerFilterToUpsample(self.lowResGaussian, k)
-
-    # def restoreSinc(self, k):
-    #      return wienerFilter(upsampleMatrix(self.lowResSinc), k)
-    #
-    # def restoreGaussian(self, k):
-    #     return wienerFilter(upsampleMatrix(self.lowResGaussian), k)
 
 
     def __gaussianMatrix(self, evenlySpacedUnion):
@@ -116,7 +95,6 @@ class imageVersions:
         psf = fftpack.fft2(psf, shape=img.shape)
         psf = np.conj(psf) / (np.abs(psf) ** 2 + k)
         return np.abs(fftpack.ifft2(fftpack.fft2(np.copy(img)) * psf))
-
 
 
 class patches:
@@ -153,10 +131,6 @@ class patches:
             for j in neighbor_indices:
                 distWeights[i, j] = np.exp(-0.5 * (np.linalg.norm(qi - rAlpha[j]) ** 2) / (sigmaNN ** 2))
         return normalizeByRows(distWeights)
-    # def __pca(self):
-    #     pca = PCA(n_components=25, svd_solver='full')
-    #     pca.fit(self.qVec)
-    #     return pca.transform(self.qVec)
 
 
 class RjCalculator:
@@ -176,13 +150,6 @@ class RjCalculator:
         for i in range(newSize[0]):
             downsampled[i, :] = highSampled[alpha * i, :]
         return downsampled
-    #
-    # def __sameSizeDownsampleWithZeros(self, mat, alpha=ALPHA):  # may choose alpha
-    #     for i in range(mat.shape[0]):
-    #         if (i % alpha):
-    #             mat[i, :] = 0  # line i is zeroes
-    #             mat[:, i] = 0  # row i is zeroes
-    #     return mat
 
 
 class kCalculator:
@@ -197,10 +164,6 @@ class kCalculator:
         k = delta.reshape(delta.size)
         for t in range(5):
             k = self.__oneIteration(k, CSquared)
-            curr_k_image = k.reshape((patchSize, patchSize))
-            plt.imshow(curr_k_image, cmap='gray')
-            plt.title(f'curr_k as an image ')
-            plt.show()
         return k.reshape((patchSize, patchSize))
 
     def __oneIteration(self, k, CSquared):
@@ -269,9 +232,9 @@ def main():
 
     imgArr = np.array(plt.imread("DIPSourceHW2.png"))[:, :, 0]
     imgArr /= imgArr.max()
-    imgNewSize = np.zeros((imgArr.shape[0]+2, imgArr.shape[1]+2))
-    imgNewSize[1:-1, 1:-1] = imgArr
-    filteredImage = imageVersions(imgNewSize)
+    expandImg = np.zeros((imgArr.shape[0]+2, imgArr.shape[1]+2))
+    expandImg[1:-1, 1:-1] = imgArr
+    filteredImage = imageVersions(expandImg)
     patchSize = 15  # how to decide?
 
     gaussianPatches = patches(filteredImage.lowResGaussian, patchSize)
@@ -285,42 +248,13 @@ def main():
     gaussianRestoredNotOptimal = filteredImage.restoreGaussian(sincOptimalK)
 
     ## plot results and PSNR with original high-res image
-    plotResults(gaussianRestoredOptimal, "gauss-ker", "gauss-ker", imgNewSize)
-    plotResults(gaussianRestoredNotOptimal, "gauss-ker", "sinc-ker", imgNewSize)
-    plotResults(sincRestoredOptimal, "sinc-ker", "sinc-ker", imgNewSize)
-    plotResults(sincRestoredNotOptimal, "sinc-ker", "gauss-ker", imgNewSize)
+    plotResults(gaussianRestoredOptimal, "gauss-ker", "gauss-ker", expandImg)
+    plotResults(gaussianRestoredNotOptimal, "gauss-ker", "sinc-ker", expandImg)
+    plotResults(sincRestoredOptimal, "sinc-ker", "sinc-ker", expandImg)
+    plotResults(sincRestoredNotOptimal, "sinc-ker", "gauss-ker", expandImg)
 
-
-    curr_k_gaus = gaussianOptimalK.reshape((patchSize, patchSize))
-    plt.imshow(curr_k_gaus, cmap='gray')
+    plt.imshow(gaussianOptimalK, cmap='gray')
     plt.show()
-
-    # plt.title('original')
-    # plt.imshow(imgArr, cmap='gray')
-    # plt.show()
-    #
-    # plt.title('gaussian')
-    # plt.imshow(filteredImage.gaussianImg, cmap='gray')
-    # plt.show()
-    #
-    # plt.title('gaussian + downsampled')
-    # plt.imshow(filteredImage.lowResGaussian, cmap='gray')
-    # plt.show()
-    #
-    # plt.title('sinc')
-    # plt.imshow(filteredImage.sincImg, cmap='gray')
-    # plt.show()
-    #
-    # plt.title('sinc + downsampled')
-    # plt.imshow(filteredImage.lowResSinc, cmap='gray')
-    # plt.show()
-
-def plotResults(restoredImg, blurredWith, restoredWith, origImg):
-    plt.imshow(restoredImg, cmap='gray')
-    PSNR = psnr(origImg[5:-5, 5:-5], restoredImg[5:-5, 5:-5])
-    plt.title(f'image blurred with {blurredWith} and restored with {restoredWith}. PSNR={PSNR:.2f}')
-    plt.show()
-
 
 if __name__ == "__main__":
     main()
